@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any, List, Union
 
@@ -22,6 +23,18 @@ from agentscope_runtime.engine.schemas.agent_schemas import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Tools whose call arguments and output are hidden in channel messages
+# when privacy mode is enabled via COPAW_HIDE_TOOL_DETAILS (or the legacy
+# COPAW_HIDE_SHELL_DETAILS).
+_PRIVACY_ENABLED = any(
+    os.environ.get(k, "false").lower() in ("true", "1", "yes")
+    for k in ("COPAW_HIDE_TOOL_DETAILS", "COPAW_HIDE_SHELL_DETAILS")
+)
+_PRIVACY_TOOLS: frozenset[str] = frozenset({
+    "execute_shell_command",
+    "read_file",
+})
 
 # Same union as base.OutgoingContentPart (renderer must not import base).
 _OutgoingPart = Union[
@@ -102,6 +115,11 @@ class MessageRenderer:
                     continue
                 data = getattr(c, "data", None) or {}
                 name = data.get("name") or "tool"
+                
+                if _PRIVACY_ENABLED and name in _PRIVACY_TOOLS:
+                    out.append(TextContent(text=f"🔧 **{name}** running"))
+                    continue
+                
                 if s.show_tool_details:
                     args = data.get("arguments") or "{}"
                     args_preview = (
@@ -164,6 +182,10 @@ class MessageRenderer:
                 data = getattr(c, "data", None) or {}
                 name = data.get("name") or "tool"
                 output = data.get("output", "")
+
+                if _PRIVACY_ENABLED and name in _PRIVACY_TOOLS:
+                    out.append(TextContent(text=f"✅ **{name}** done"))
+                    continue
 
                 try:
                     output = json.loads(output)
